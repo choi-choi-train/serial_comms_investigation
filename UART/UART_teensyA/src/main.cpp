@@ -63,8 +63,8 @@ void exchange_ping() {
 }
 
 void setup() {
-    Serial.begin(576000);
-    Serial3.begin(576000);
+    Serial.begin(115200);
+    Serial3.begin(115200);
 
     while (!Serial);
     attachErrFunc(ErrorHandler(Serial));

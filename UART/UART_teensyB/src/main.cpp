@@ -17,7 +17,7 @@ void callback() {
 }
 
 void setup() {
-  Serial3.begin(576000);
+  Serial3.begin(115200);
   t1.begin(callback, 100);
 }
 

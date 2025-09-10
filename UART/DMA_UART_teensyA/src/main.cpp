@@ -4,7 +4,7 @@
 #include "imxrt.h"
 
 #define BUFFER_SIZE 4
-#define DATA_REGISTER *(volatile uint8_t*)IMXRT_LPUART3_ADDRESS //dereferenced first 8 bits of TX REGISTER, located at IMXRT_LPUART6
+#define DATA_REGISTER (*(uint8_t*)IMXRT_LPUART6_ADDRESS)
 
 using namespace std;
 using namespace TeensyTimerTool;
@@ -14,25 +14,26 @@ PeriodicTimer t1(TCK_RTC);
 // ======= DMA HOUSEKEEPING =======
 DMAChannel rx_dma;
 DMAChannel tx_dma;
-uint32_t rx_buffer; // word size of 4 bytes sent between DMA buffers
-uint32_t tx_buffer; // word size of 4 bytes sent between DMA buffers
+uint8_t rx_buffer[BUFFER_SIZE]; // word size of 4 bytes sent between DMA buffers
+uint8_t tx_buffer[BUFFER_SIZE]; // word size of 4 bytes sent between DMA buffers
 
 // ======= DATA COLLECTION =======
 int ping_counter = 0;
 uint32_t recorded_times[10000];
+uint32_t tx_data = 123456789;
 
 void polling();
 void ISR();
 
 void analyze_results() {
     uint32_t total_time = 0;
-    for (int t=0; 10000; t++) {
+    for (int t=0; t<10000; t++) {
         total_time += recorded_times[t];
     }
     float mean = static_cast<float>(total_time/10000.f);
 
     float sigma = 0;
-    for (int t=0; t<sizeof(recorded_times); t++) {
+    for (int t=0; t<10000; t++) {
         sigma += ((recorded_times[t]-mean)*(recorded_times[t]-mean));
     }
 
@@ -49,27 +50,29 @@ void analyze_results() {
 }
 
 void polling() {
-    uint32_t tx_data = 123456789;
-
-    int initial_time = micros();
+    uint32_t initial_time = micros();
 
     // prepare RX DMA
-    rx_dma.destinationBuffer(&rx_buffer, BUFFER_SIZE);
-    rx_dma.transferCount(1);
+    rx_dma.destinationBuffer(rx_buffer, BUFFER_SIZE);
+    rx_dma.transferCount(BUFFER_SIZE);
     rx_dma.enable();
+    Serial.println("Ready to receive data from RX register...");
 
     // begin TX DMA
-    tx_dma.sourceBuffer(&tx_buffer, BUFFER_SIZE);
-    tx_dma.transferCount(1);
+    memcpy(tx_buffer, &tx_data, BUFFER_SIZE);
+    tx_dma.sourceBuffer(tx_buffer, BUFFER_SIZE);
+    tx_dma.transferCount(BUFFER_SIZE);
     tx_dma.enable();
+    Serial.println("Sending DMA to TX register...");
 
-    while (!rx_dma.complete()); // WAIT FOR RESPONSE
+    while (!rx_dma.complete());
     rx_dma.clearComplete();
 
     // READ DATA FROM DMA
     uint32_t rx_data = *(uint32_t*) rx_buffer;
+    Serial.printf("DATA RECEIVED from RX DMA: %d\n", rx_data);
 
-    float elapsed_time = micros() - initial_time;
+    uint32_t elapsed_time = micros() - initial_time;
     
     recorded_times[ping_counter] = elapsed_time;
     ping_counter++;
@@ -86,24 +89,22 @@ void ISR() {
 
 void setup() {
   Serial.begin(115200);
+  Serial3.begin(115200);
+
+  // UART RX DMA
+  rx_dma.source(DATA_REGISTER);
+  rx_dma.destinationBuffer(rx_buffer, BUFFER_SIZE);
+  rx_dma.transferSize(1);
 
 // UART TX DMA
-  tx_dma.sourceBuffer(&tx_buffer, BUFFER_SIZE); // allocate a buffer in RAM
-  tx_dma.destination(DATA_REGISTER); // set UART TX data register as the destination.
-  tx_dma.transferCount(BUFFER_SIZE); // send 4 bytes total
-  tx_dma.transferSize(4); // bytes to be sent per transfer
-
-// UART RX DMA
-  rx_dma.triggerAtHardwareEvent(DMAMUX_SOURCE_LPUART3_RX); // handles response, DMA stuffs data into RX register
-  rx_dma.source(DATA_REGISTER);
-  rx_dma.transferSize(4);
+  tx_dma.sourceBuffer(&tx_data, BUFFER_SIZE);
+  tx_dma.destination(DATA_REGISTER); 
+  tx_dma.transferSize(1);
 
   while (!Serial);
+  Serial.println("TEST START");
   t1.begin(polling, 100);
   attachErrFunc(ErrorHandler(Serial));
-
-  rx_dma.enable();
-  tx_dma.enable();
 }
 
 void loop() {
